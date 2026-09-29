@@ -3,8 +3,10 @@
   import StageSVG from './lib/components/StageSVG.svelte';
   import CueList from './lib/components/CueList.svelte';
   import CueEditor from './lib/components/CueEditor.svelte';
-  import Transport from './lib/components/Transport.svelte';
-  import ManualPanel from './lib/components/ManualPanel.svelte';
+import Transport from './lib/components/Transport.svelte';
+import ManualPanel from './lib/components/ManualPanel.svelte';
+import PatchPanel from './lib/components/PatchPanel.svelte';
+import DmxMonitor from './lib/components/DmxMonitor.svelte';
 
   const examples = [
     '点 GO 执行第一个 Cue（开场暖场），观察灯 1/2/11/12 按各自升光秒数渐亮。',
@@ -34,6 +36,8 @@
     <div class="col right">
       <CueEditor running={store.running} />
     </div>
+    <PatchPanel />
+    <DmxMonitor />
   </div>
 
   <section class="examples">

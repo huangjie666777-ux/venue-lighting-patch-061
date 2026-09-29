@@ -33,3 +33,65 @@ export interface FieldError {
   field: string;
   message: string;
 }
+
+export const UNIVERSE_COUNT = 4;
+export const DMX_SLOT_COUNT = 512;
+
+export interface ConstantSlot {
+  offset: number;
+  value: number;
+}
+
+export interface FixtureType {
+  id: string;
+  name: string;
+  slots: number;
+  resolution: 8 | 16;
+  /** 相对起始地址的 0 基偏移 */
+  coarseOffset: number;
+  fineOffset?: number;
+  /** key 为 0 基偏移，value 为 0..255 常量 */
+  constants: Record<string, number>;
+}
+
+export interface Fixture {
+  id: string;
+  name: string;
+  typeId: string;
+  universe: number; // 1..4
+  address: number; // 1..512
+  logicalChannels: number[]; // 1..12，跨灯具不得重复
+  maxLevel: number; // 0..100
+}
+
+export interface PatchConfig {
+  types: FixtureType[];
+  fixtures: Fixture[];
+}
+
+export interface PublishedPatch extends PatchConfig {
+  version: number;
+  publishedAt: number;
+}
+
+export interface PatchError {
+  kind: 'type' | 'fixture' | 'conflict';
+  id: string;
+  field?: string;
+  message: string;
+  otherId?: string;
+}
+
+export interface FixtureOutput {
+  fixture: Fixture;
+  type: FixtureType;
+  level: number;
+  start: number;
+  end: number;
+  slots: { offset: number; absolute: number; value: number; source: string }[];
+}
+
+export interface DmxRendering {
+  frames: Uint8Array[];
+  fixtureOutputs: FixtureOutput[];
+}

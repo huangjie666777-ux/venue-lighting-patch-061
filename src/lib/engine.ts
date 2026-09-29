@@ -1,5 +1,6 @@
 import { resolveCues } from './cues';
-import { CHANNEL_COUNT, type Cue, type ResolvedCue } from './types';
+import { renderDmx, samplePatch } from './dmx';
+import { CHANNEL_COUNT, type Cue, type DmxRendering, type PublishedPatch, type ResolvedCue } from './types';
 
 interface Fade {
   from: number;
@@ -26,6 +27,8 @@ export interface EngineSnapshot {
   fading: boolean;
   followRemaining: number | null;
   followTotal: number | null;
+  dmx: DmxRendering;
+  patchVersion: number;
 }
 
 export class ConsoleEngine {
@@ -45,10 +48,15 @@ export class ConsoleEngine {
 
   private takeover = Array.from({ length: CHANNEL_COUNT }, () => false);
   private takeoverLevels = Array.from({ length: CHANNEL_COUNT }, () => 0);
+  private patch: PublishedPatch = samplePatch();
 
   setCues(cues: Cue[]): void {
     this.cues = cues;
     this.resolved = resolveCues(cues);
+  }
+
+  setPatch(patch: PublishedPatch): void {
+    this.patch = patch;
   }
 
   start(): void {
@@ -145,14 +153,24 @@ export class ConsoleEngine {
     while (remaining > 0) {
       const fadeBudget = this.fadeBudget();
       if (fadeBudget > 0) {
-        if (remaining < fadeBudget) {
+        if (remaining <= fadeBudget) {
           this.advanceFades(remaining);
+          const reachedFadeEnd = remaining === fadeBudget;
           remaining = 0;
+          if (!this.anyFading()) {
+            this.maybeArmFollow(this.currentIndex);
+            if (reachedFadeEnd && this.followRemaining === 0) {
+              this.followRemaining = null;
+              this.followTotal = null;
+              if (this.currentIndex + 1 < this.cues.length) this.go(this.currentIndex + 1);
+            }
+          }
+          break;
         } else {
           this.advanceFades(fadeBudget);
           remaining -= fadeBudget;
+          this.maybeArmFollow(this.currentIndex);
         }
-        if (!this.anyFading() && this.followRemaining === null) this.maybeArmFollow(this.currentIndex);
         if (!this.anyFading() && this.followRemaining === null) break;
         continue;
       }
@@ -234,6 +252,8 @@ export class ConsoleEngine {
       fading,
       followRemaining: this.followRemaining,
       followTotal: this.followTotal,
+      dmx: renderDmx(this.getOutput(), this.patch, false),
+      patchVersion: this.patch.version,
     };
   }
 }

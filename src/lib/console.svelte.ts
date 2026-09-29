@@ -1,6 +1,7 @@
 import { ConsoleEngine, type EngineSnapshot } from './engine';
 import { createId, emptyCue, sampleCues, validateCues } from './cues';
-import { CHANNEL_COUNT, type Cue } from './types';
+import { clonePatch, publishPatch, samplePatch, validatePatch } from './dmx';
+import { CHANNEL_COUNT, type Cue, type Fixture, type FixtureType, type PatchConfig, type PatchError, type PublishedPatch } from './types';
 
 /**
  * 控台应用状态：Cue 节目单（可编辑）+ 播放引擎 + rAF 驱动的快照。
@@ -11,13 +12,19 @@ export class ConsoleStore {
   selectedId = $state<string>('');
   errors = $state<{ cueId: string; field: string; message: string }[]>([]);
   snap = $state<EngineSnapshot>(new ConsoleEngine().snapshot());
+  activePatch = $state<PublishedPatch>(samplePatch());
+  draftPatch = $state<PatchConfig>(clonePatch(this.activePatch));
+  patchErrors = $state<PatchError[]>([]);
 
   engine = new ConsoleEngine();
   private lastTime: number | null = null;
   private rafId = 0;
 
   constructor() {
+    this.engine.setPatch(this.activePatch);
+    this.draftPatch = clonePatch(this.activePatch);
     this.revalidate();
+    this.revalidatePatch();
     this.selectedId = this.cues[0]?.id ?? '';
     this.sync();
   }
@@ -32,6 +39,14 @@ export class ConsoleStore {
 
   get canRun(): boolean {
     return this.errors.length === 0 && this.cues.length > 0;
+  }
+
+  get patchDirty(): boolean {
+    return JSON.stringify(this.draftPatch) !== JSON.stringify(this.stripVersion(this.activePatch));
+  }
+
+  private stripVersion(patch: PublishedPatch): PatchConfig {
+    return { types: clonePatch(patch).types, fixtures: clonePatch(patch).fixtures };
   }
 
   private revalidate(): void {
@@ -127,6 +142,107 @@ export class ConsoleStore {
 
   fieldError(cueId: string, field: string): string | undefined {
     return this.errors.find((e) => e.cueId === cueId && e.field === field)?.message;
+  }
+
+  private revalidatePatch(): void {
+    this.patchErrors = validatePatch(this.draftPatch);
+  }
+
+  patchError(id: string, field?: string): PatchError[] {
+    return this.patchErrors.filter((e) => e.id === id && (field === undefined || e.field === field || e.field?.startsWith(`${field}.`)));
+  }
+
+  addFixtureType(): void {
+    this.draftPatch.types.push({
+      id: createId().replace('cue', 'type'),
+      name: '新灯型',
+      slots: 1,
+      resolution: 8,
+      coarseOffset: 0,
+      constants: {},
+    });
+    this.revalidatePatch();
+  }
+
+  updateFixtureType(id: string, patch: Partial<FixtureType>): void {
+    const type = this.draftPatch.types.find((item) => item.id === id);
+    if (!type) return;
+    Object.assign(type, patch);
+    if (type.resolution === 8) delete type.fineOffset;
+    this.revalidatePatch();
+  }
+
+  deleteFixtureType(id: string): void {
+    this.draftPatch.types = this.draftPatch.types.filter((item) => item.id !== id);
+    this.revalidatePatch();
+  }
+
+  constantsText(type: FixtureType): string {
+    return Object.entries(type.constants).map(([offset, value]) => `${offset}:${value}`).join(', ');
+  }
+
+  setConstants(id: string, text: string): void {
+    const type = this.draftPatch.types.find((item) => item.id === id);
+    if (!type) return;
+    const constants: Record<string, number> = {};
+    for (const part of text.split(/[,，]/)) {
+      const pieces = part.trim().split(/[:：]/);
+      if (pieces.length === 2 && pieces[0].trim() !== '') constants[String(Number(pieces[0]))] = Number(pieces[1]);
+    }
+    type.constants = constants;
+    this.revalidatePatch();
+  }
+
+  addFixture(): void {
+    this.draftPatch.fixtures.push({
+      id: createId().replace('cue', 'fixture'),
+      name: '新灯具',
+      typeId: this.draftPatch.types[0]?.id ?? '',
+      universe: 1,
+      address: 1,
+      logicalChannels: [1],
+      maxLevel: 100,
+    });
+    this.revalidatePatch();
+  }
+
+  updateFixture(id: string, patch: Partial<Fixture>): void {
+    const fixture = this.draftPatch.fixtures.find((item) => item.id === id);
+    if (!fixture) return;
+    Object.assign(fixture, patch);
+    this.revalidatePatch();
+  }
+
+  setLogicalChannels(id: string, text: string): void {
+    const fixture = this.draftPatch.fixtures.find((item) => item.id === id);
+    if (!fixture) return;
+    fixture.logicalChannels = text
+      .split(/[,，\s]+/)
+      .filter(Boolean)
+      .map((part) => Number(part.trim()));
+    this.revalidatePatch();
+  }
+
+  deleteFixture(id: string): void {
+    this.draftPatch.fixtures = this.draftPatch.fixtures.filter((item) => item.id !== id);
+    this.revalidatePatch();
+  }
+
+  applyPatch(): boolean {
+    const errors = validatePatch(this.draftPatch);
+    this.patchErrors = errors;
+    if (errors.length > 0) return false;
+    const next = publishPatch(clonePatch(this.draftPatch), this.activePatch.version + 1);
+    this.engine.setPatch(next);
+    this.activePatch = next;
+    this.draftPatch = clonePatch(next);
+    this.sync();
+    return true;
+  }
+
+  resetPatchDraft(): void {
+    this.draftPatch = clonePatch(this.activePatch);
+    this.revalidatePatch();
   }
 
   go(): void {

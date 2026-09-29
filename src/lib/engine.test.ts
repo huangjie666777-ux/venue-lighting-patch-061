@@ -98,6 +98,17 @@ describe('暂停 / 继续', () => {
 });
 
 describe('跟随等待', () => {
+  it('渐变恰在帧点结束时零秒跟随不延后一帧', () => {
+    const e = engine([
+      mkCue({ id: 'a', name: 'A', channels: { '1': { level: 100, up: 2, down: 2 } }, follow: 0 }),
+      mkCue({ id: 'b', name: 'B', channels: { '1': { level: 0, up: 0, down: 2 } } }),
+    ]);
+    e.go(0);
+    e.tick(2);
+    expect(e.snapshot().currentIndex).toBe(1);
+    expect(e.snapshot().baseLevels[0]).toBe(100);
+  });
+
   it('各灯完成后才开始跟随，到期自动执行下一 Cue，末项不跟随', () => {
     const e = engine([
       mkCue({ id: 'a', name: 'A', channels: { '1': { level: 100, up: 2, down: 2 } }, follow: 2 }),
