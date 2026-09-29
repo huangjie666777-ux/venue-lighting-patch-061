@@ -127,6 +127,16 @@ describe('跟随等待', () => {
     e.go(3); // 手动跳场取消旧跟随（末项不跟随）
     expect(e.snapshot().followRemaining).toBeNull();
   });
+
+  it('渐变恰好在当前帧结束时，零秒跟随不在下一帧延迟', () => {
+    const e = engine([
+      mkCue({ id: 'a', name: 'A', channels: { '1': { level: 100, up: 2, down: 2 } }, follow: 0 }),
+      mkCue({ id: 'b', name: 'B', channels: { '2': { level: 100, up: 0, down: 0 } } }),
+    ]);
+    e.go(0);
+    e.tick(2);
+    expect(e.snapshot().currentIndex).toBe(1);
+  });
 });
 
 describe('接管 / 总控 / 黑场 / 停止', () => {

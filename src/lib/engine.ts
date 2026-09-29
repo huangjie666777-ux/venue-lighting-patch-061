@@ -153,12 +153,23 @@ export class ConsoleEngine {
           remaining -= fadeBudget;
         }
         if (!this.anyFading() && this.followRemaining === null) this.maybeArmFollow(this.currentIndex);
+        if (remaining === 0 && this.followRemaining === 0) {
+          this.followRemaining = null;
+          this.followTotal = null;
+          if (this.currentIndex + 1 < this.cues.length) this.go(this.currentIndex + 1);
+        }
         if (!this.anyFading() && this.followRemaining === null) break;
         continue;
       }
 
       if (this.followRemaining === null) break;
       const wait = this.followRemaining;
+      if (wait === 0) {
+        this.followRemaining = null;
+        this.followTotal = null;
+        if (this.currentIndex + 1 < this.cues.length) this.go(this.currentIndex + 1);
+        continue;
+      }
       if (remaining < wait) {
         this.followRemaining -= remaining;
         break;

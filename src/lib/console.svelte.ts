@@ -1,5 +1,17 @@
 import { ConsoleEngine, type EngineSnapshot } from './engine';
 import { createId, emptyCue, sampleCues, validateCues } from './cues';
+import {
+  clonePatch,
+  renderPatch,
+  samplePatch,
+  validatePatch,
+  UNIVERSE_COUNT,
+  type ActivePatch,
+  type DimmerWidth,
+  type PatchConfig,
+  type PatchError,
+  type PatchRenderResult,
+} from './patch';
 import { CHANNEL_COUNT, type Cue } from './types';
 
 /**
@@ -8,6 +20,12 @@ import { CHANNEL_COUNT, type Cue } from './types';
  */
 export class ConsoleStore {
   cues = $state<Cue[]>(sampleCues());
+  activePatch = $state<ActivePatch>({ version: 1, publishedAt: new Date().toISOString(), config: clonePatch(samplePatch()) });
+  draftPatch = $state<PatchConfig>(clonePatch(samplePatch()));
+  patchErrors = $state<PatchError[]>([]);
+  patchMessage = $state('');
+  selectedUniverse = $state(1);
+  patchRender = $state<PatchRenderResult>(renderPatch(this.activePatch.config, new ConsoleEngine().getOutput()));
   selectedId = $state<string>('');
   errors = $state<{ cueId: string; field: string; message: string }[]>([]);
   snap = $state<EngineSnapshot>(new ConsoleEngine().snapshot());
@@ -18,6 +36,7 @@ export class ConsoleStore {
 
   constructor() {
     this.revalidate();
+    this.revalidatePatch();
     this.selectedId = this.cues[0]?.id ?? '';
     this.sync();
   }
@@ -32,6 +51,10 @@ export class ConsoleStore {
 
   get canRun(): boolean {
     return this.errors.length === 0 && this.cues.length > 0;
+  }
+
+  get draftDirty(): boolean {
+    return JSON.stringify(this.draftPatch) !== JSON.stringify(this.activePatch.config);
   }
 
   private revalidate(): void {
@@ -129,6 +152,136 @@ export class ConsoleStore {
     return this.errors.find((e) => e.cueId === cueId && e.field === field)?.message;
   }
 
+  private revalidatePatch(): void {
+    this.patchErrors = validatePatch(this.draftPatch);
+  }
+
+  private patchError(ownerId: string | undefined, field: string): PatchError | undefined {
+    return this.patchErrors.find((error) => (error.typeId === ownerId || error.fixtureId === ownerId) && error.field === field);
+  }
+
+  patchTypeError(id: string, field: string): string {
+    return this.patchError(id, field)?.message ?? '';
+  }
+
+  patchFixtureError(id: string, field: string): string {
+    const own = this.patchError(id, field)?.message;
+    if (own) return own;
+    return this.patchErrors
+      .filter((error) => error.fixtureId === id && error.field === 'addressRange')
+      .map((error) => error.message)
+      .join('；');
+  }
+
+  addFixtureType(): void {
+    const id = `type-${this.draftPatch.types.length + 1}-${Date.now().toString(36)}`;
+    this.draftPatch.types.push({ id, name: '新灯型', slotCount: 1, width: 8, coarseOffset: 0, constants: {} });
+    this.revalidatePatch();
+  }
+
+  updateFixtureType(id: string, field: 'name' | 'slotCount' | 'coarseOffset' | 'fineOffset', raw: string): void {
+    const item = this.draftPatch.types.find((type) => type.id === id);
+    if (!item) return;
+    if (field === 'name') item.name = raw;
+    else if (field === 'fineOffset') item.fineOffset = raw.trim() === '' ? undefined : Number(raw);
+    else if (field === 'slotCount') item.slotCount = Number(raw);
+    else item.coarseOffset = Number(raw);
+    this.revalidatePatch();
+  }
+
+  setFixtureTypeWidth(id: string, width: DimmerWidth): void {
+    const item = this.draftPatch.types.find((type) => type.id === id);
+    if (!item) return;
+    item.width = width;
+    if (width === 8) delete item.fineOffset;
+    else item.fineOffset = item.coarseOffset === 1 ? 2 : 1;
+    this.revalidatePatch();
+  }
+
+  setConstants(id: string, raw: string): void {
+    const item = this.draftPatch.types.find((type) => type.id === id);
+    if (!item) return;
+    const constants: Record<number, number> = {};
+    for (const part of raw.split(',')) {
+      const text = part.trim();
+      if (!text) continue;
+      const [offset, value] = text.split('=').map((segment) => segment.trim());
+      constants[Number(offset)] = Number(value);
+    }
+    item.constants = constants;
+    this.revalidatePatch();
+  }
+
+  constantsText(type: { constants: Record<number, number> }): string {
+    return Object.entries(type.constants).map(([offset, value]) => `${offset}=${value}`).join(', ');
+  }
+
+  deleteFixtureType(id: string): void {
+    this.draftPatch.types = this.draftPatch.types.filter((type) => type.id !== id);
+    this.revalidatePatch();
+  }
+
+  addFixture(): void {
+    const id = `fixture-${this.draftPatch.fixtures.length + 1}-${Date.now().toString(36)}`;
+    this.draftPatch.fixtures.push({
+      id,
+      name: '新灯具',
+      typeId: this.draftPatch.types[0]?.id ?? '',
+      universe: 1,
+      startAddress: 1,
+      logicalChannels: [1],
+      maxLevel: 100,
+    });
+    this.revalidatePatch();
+  }
+
+  updateFixture(id: string, field: 'name' | 'typeId' | 'universe' | 'startAddress' | 'maxLevel', raw: string | number): void {
+    const item = this.draftPatch.fixtures.find((fixture) => fixture.id === id);
+    if (!item) return;
+    if (field === 'name' || field === 'typeId') item[field] = String(raw);
+    else item[field] = Number(raw);
+    this.revalidatePatch();
+  }
+
+  setFixtureLogical(id: string, raw: string): void {
+    const item = this.draftPatch.fixtures.find((fixture) => fixture.id === id);
+    if (!item) return;
+    item.logicalChannels = raw.split(/[\s,，、]+/).filter(Boolean).map(Number);
+    this.revalidatePatch();
+  }
+
+  fixtureLogicalText(fixture: { logicalChannels: number[] }): string {
+    return fixture.logicalChannels.join(', ');
+  }
+
+  deleteFixture(id: string): void {
+    this.draftPatch.fixtures = this.draftPatch.fixtures.filter((fixture) => fixture.id !== id);
+    this.revalidatePatch();
+  }
+
+  applyPatch(): void {
+    const errors = validatePatch(this.draftPatch);
+    this.patchErrors = errors;
+    if (errors.length > 0) {
+      this.patchMessage = `配接未应用：${errors.length} 处错误`;
+      return;
+    }
+    const config = clonePatch(this.draftPatch);
+    this.activePatch = { version: this.activePatch.version + 1, publishedAt: new Date().toISOString(), config };
+    this.patchMessage = `已发布版本 ${this.activePatch.version}`;
+    this.sync();
+  }
+
+  revertPatch(): void {
+    this.draftPatch = clonePatch(this.activePatch.config);
+    this.patchMessage = '';
+    this.revalidatePatch();
+  }
+
+  selectUniverse(universe: number): void {
+    this.selectedUniverse = Math.min(UNIVERSE_COUNT, Math.max(1, universe));
+  }
+
   go(): void {
     if (!this.canRun) return;
     this.engine.go();
@@ -205,6 +358,7 @@ export class ConsoleStore {
 
   private sync(): void {
     this.snap = this.engine.snapshot();
+    this.patchRender = renderPatch(this.activePatch.config, this.snap.outputLevels);
   }
 }
 

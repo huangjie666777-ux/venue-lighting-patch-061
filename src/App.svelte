@@ -5,12 +5,16 @@
   import CueEditor from './lib/components/CueEditor.svelte';
   import Transport from './lib/components/Transport.svelte';
   import ManualPanel from './lib/components/ManualPanel.svelte';
+  import PatchPanel from './lib/components/PatchPanel.svelte';
+  import DmxMonitor from './lib/components/DmxMonitor.svelte';
 
   const examples = [
     '点 GO 执行第一个 Cue（开场暖场），观察灯 1/2/11/12 按各自升光秒数渐亮。',
     '跟随 2 秒后自动进入“主角定点”；渐变中再点 GO 会从当时亮度接续，不回旧目标。',
     '在节目单点“跳”可跳场；暂停会冻结渐变与跟随倒计时，继续只走剩余时间。',
     '手动区点 #5“接管”后拖动滑杆；释放即回到当时基础亮度。总控与黑场只改输出。',
+    '在场地配接区修改灯型或灯具草稿，修正错误后点“应用配接”；运行或暂停中都不会重置 Cue、渐变和接管。',
+    '切换宇宙查看四个 512 字节帧；黑场或停止时调光槽归零，常量槽仍保持配置值。',
   ];
 </script>
 
@@ -30,10 +34,15 @@
       />
       <Transport />
       <ManualPanel />
+      <DmxMonitor />
     </div>
     <div class="col right">
       <CueEditor running={store.running} />
     </div>
+  </div>
+
+  <div class="patch-wrap">
+    <PatchPanel />
   </div>
 
   <section class="examples">
@@ -89,6 +98,7 @@
   }
   .col.center { display: flex; flex-direction: column; gap: 14px; }
   .col.left, .col.right { max-height: 760px; overflow: hidden; }
+  .patch-wrap { margin-top: 14px; }
   .examples {
     margin-top: 18px;
     background: #14161e;
