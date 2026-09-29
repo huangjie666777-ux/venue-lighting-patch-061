@@ -1,9 +1,54 @@
-# Live Lighting Console
+# 小剧场灯光走台控台（Live Lighting Console）
 
-Svelte 5 and TypeScript project skeleton. Business features are not implemented.
+基于 TypeScript 5.8 + Svelte 5.28（runes）+ Vite 的纯浏览器灯光走台模拟，不接硬件。
+固定 12 盏调光灯，以 SVG 展示灯位与实际输出。
 
-Node.js 22.19.0; dependencies are pinned in package.json and package-lock.json.
+## 启动
 
-- `npm run dev` starts Vite.
-- `npm run build` runs Svelte checks and the production build.
-- `npm test` runs tests added to this project.
+- `npm run dev` 启动开发服务器（默认 http://localhost:5173/）
+- `npm run build` 先 `svelte-check` 类型检查再生产构建
+- `npm test` 运行 Vitest（Cue 解析/校验、引擎计时、SSR 冒烟）
+
+## 代码组织（按职责分文件）
+
+- `src/lib/types.ts`：`Cue`、单灯记录、解析结果与错误定位类型
+- `src/lib/cues.ts`：节目单校验、按节目顺序的继承解析、示例节目
+- `src/lib/engine.ts`：与框架无关的走台计时引擎（渐变/跟随/暂停/接管/总控/黑场）
+- `src/lib/console.svelte.ts`：Svelte 状态层，rAF 按“经过时间”驱动引擎并广播快照
+- `src/lib/components/`：
+  - `StageSVG.svelte` 舞台 SVG（光晕=实际输出，进度环=基础亮度，“手”=接管标记）
+  - `CueList.svelte` 节目单：选中、新增、复制、删除、上移/下移、运行中跳场
+  - `CueEditor.svelte` 编辑编号/名称、逐灯亮度与升降秒数、跟随等待
+  - `Transport.svelte` 当前/下一 Cue、渐变进度、跟随倒计时、GO/暂停/继续/停止、总控、黑场
+  - `ManualPanel.svelte` 12 灯手动接管与调光
+- `src/App.svelte`：三栏布局与操作示例
+
+## Cue 语义
+
+- 每个 Cue 有唯一 `id` 与节目内唯一名称，只记录**部分**灯。
+- 每灯记录：亮度 `0..100`、升光秒数（非负）、降光秒数（非负）；Cue 可填跟随等待秒数（非负，可空）。
+- 未记录的灯**继承节目顺序上的前序 Cue**；第一个 Cue 之前所有灯为 0。
+- 显式填 `0` 表示“熄灭”，会覆盖继承值；空着（“改为继承”）才表示不覆盖。
+- 非法输入（越界亮度、负数时长、空名/重名、非法跟随）在对应输入框红框并在节目单点列出，未修正前不能 GO。
+
+## 走台规则
+
+- **GO** 执行下一 Cue；在节目单点“跳”可跳场。目标始终按节目顺序解析继承，与执行路径无关。
+- 从**当时基础亮度**逐灯线性过渡：变亮用目标 Cue 的升光秒数，变暗用降光秒数；0 秒立即到位。
+- 渐变进行中再次 GO/跳场，以当下亮度为新起点重建渐变，不会跳回旧目标；手动操作同时取消旧跟随。
+- **暂停**冻结渐变和跟随倒计时；继续只推进剩余时间。
+- 所有灯完成后才开始跟随等待，到期自动执行下一 Cue；末项不再跟随。
+- 计时按帧间真实经过秒数推进，并在一帧内处理“渐变完成→跟随→零等待连场”，
+  因此帧回调延迟不会累积漂移，也不会漏过连续跟随。
+- 每灯可**手动接管**调光；接管期间基础渐变继续，释放后立即跟随当时基础亮度。
+- 输出合成：先取接管值或基础值，再乘总控比例；**黑场强制输出 0**。
+  总控与黑场不修改 Cue、不暂停计时，解除黑场即恢复当时应有输出。
+- 运行中节目编辑锁定；**停止归零**会清空输出、接管状态与待触发跟随事件，恢复编辑。
+
+## 操作示例（页面底部亦有）
+
+1. 点 GO，开场暖场的灯 1/2/11/12 按各自升光秒数渐亮，跟随 2 秒后自动进入下一 Cue。
+2. “主角定点”把灯 5/6 拉到 100、把灯 1/2 显式降到 0；渐变途中再点 GO 可观察从当前亮度接续。
+3. 暂停后等待数秒再继续：渐变与跟随倒计时只走剩余时间。
+4. 对 #5 点“接管”拖到任意亮度，再点一次释放，输出立刻回到基础渐变值。
+5. 拖动总控或按下黑场：舞台 SVG 输出立即变化，但节目与计时不受影响。
